@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "AquaFlow",
+    "slug": "aquaflow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/AQUAFLOW LOGO.jpg",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/AQUAFLOW LOGO.jpg",
+      "resizeMode": "cover",
+      "backgroundColor": "#87CEEB"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/AQUAFLOW LOGO.jpg",
+        "backgroundColor": "#87CEEB"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.aquaflow"
+    },
+    "web": {
+      "favicon": "./assets/AQUAFLOW LOGO.jpg"
+    }
+  }
+}
