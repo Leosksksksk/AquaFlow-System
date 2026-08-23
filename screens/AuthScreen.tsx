@@ -29,6 +29,7 @@ export default function AuthScreen({
 }: Props) {
   const [selectedRole] = useState<UserRole>(initialRole);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
@@ -44,6 +45,10 @@ export default function AuthScreen({
     }
 
     if (isSignUp) {
+      if (!fullName.trim()) {
+        Alert.alert('Error', 'Please enter your full name.');
+        return;
+      }
       if (!contactNumber) {
         Alert.alert('Error', 'Please enter your contact number.');
         return;
@@ -63,6 +68,7 @@ export default function AuthScreen({
           password,
           options: {
             data: {
+              full_name: fullName,
               contact_number: contactNumber,
               role: selectedRole,
             },
@@ -165,6 +171,21 @@ export default function AuthScreen({
               </View>
 
               <View style={styles.form}>
+                {isSignUp && (
+                  <>
+                    <Text style={styles.label}>Full Name</Text>
+                    <View style={styles.inputWrap}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Enter your full name"
+                        placeholderTextColor="#94a3b8"
+                        value={fullName}
+                        onChangeText={setFullName}
+                      />
+                    </View>
+                  </>
+                )}
+
                 <Text style={styles.label}>Email Address</Text>
                 <View style={styles.inputWrap}>
                   <TextInput
@@ -496,4 +517,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-});
+}); 
