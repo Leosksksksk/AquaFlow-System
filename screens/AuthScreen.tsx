@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,7 +20,7 @@ import { UserRole } from '../types/report';
 interface Props {
   initialRole?: UserRole;
   onBack?: () => void;
-  onLoginSuccess: (role: UserRole) => void;
+  onLoginSuccess: (role: UserRole, fullName: string) => void;
 }
 
 export default function AuthScreen({
@@ -37,6 +38,27 @@ export default function AuthScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // --- Forgot Password state ---
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [resetStep, setResetStep] = useState<'email' | 'code'>('email');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Cooldown timer for Resend Code button
+  useEffect(() => {
+   let timer: ReturnType<typeof setInterval>;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   const handleAuth = async () => {
     if (!email || !password) {
@@ -93,15 +115,19 @@ export default function AuthScreen({
         let userRole = data.user?.user_metadata?.role as UserRole;
 
         // 2. Fallback check from profiles table if metadata is missing
-        if (!userRole && data.user) {
+        let fullName: string = data.user?.user_metadata?.full_name ?? '';
+        if ((!userRole || !fullName) && data.user) {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role')
+            .select('role, full_name')
             .eq('id', data.user.id)
             .single();
 
           if (profile?.role) {
             userRole = profile.role as UserRole;
+          }
+          if (profile?.full_name) {
+            fullName = profile.full_name;
           }
         }
 
@@ -115,12 +141,99 @@ export default function AuthScreen({
           return;
         }
 
-        onLoginSuccess(userRole || selectedRole);
+        onLoginSuccess(userRole || selectedRole, fullName);
       }
     } catch (error: any) {
       Alert.alert('Authentication Error', error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // --- Forgot Password handlers ---
+
+  const openForgotPassword = () => {
+    setResetStep('email');
+    setResetEmail(email); // pre-fill with whatever they typed in the login email field
+    setResetCode('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setForgotVisible(true);
+  };
+
+  const sendResetCode = async () => {
+    if (!resetEmail.trim()) {
+      Alert.alert('Error', 'Please enter your email address.');
+      return;
+    }
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim());
+    setResetLoading(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+    Alert.alert('Check your email', 'We sent a reset code to your email address.');
+    setResetStep('code');
+    setResendCooldown(60); // start cooldown after initial code sent
+  };
+
+  const handleResendCode = async () => {
+    if (!resetEmail.trim()) {
+      Alert.alert('Error', 'Email address is missing.');
+      return;
+    }
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim());
+    setResetLoading(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Code Sent', 'A new password reset code has been sent to your email.');
+      setResendCooldown(60); // start 60s timer to prevent rate limits
+    }
+  };
+
+  const confirmPasswordReset = async () => {
+    if (!resetCode.trim()) {
+      Alert.alert('Error', 'Please enter the code from your email.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      Alert.alert('Error', 'Passwords do not match.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: resetEmail.trim(),
+        token: resetCode.trim(),
+        type: 'recovery',
+      });
+      if (verifyError) throw verifyError;
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (updateError) throw updateError;
+
+      // Sign out so they log in fresh with the new password
+      await supabase.auth.signOut();
+
+      Alert.alert('Success', 'Your password has been reset. Please log in.');
+      setForgotVisible(false);
+      setPassword('');
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -235,6 +348,12 @@ export default function AuthScreen({
                   </TouchableOpacity>
                 </View>
 
+                {!isSignUp && (
+                  <TouchableOpacity onPress={openForgotPassword} style={styles.forgotLink}>
+                    <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+                  </TouchableOpacity>
+                )}
+
                 {isSignUp && (
                   <>
                     <Text style={styles.label}>Re-enter Password</Text>
@@ -295,6 +414,133 @@ export default function AuthScreen({
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Forgot Password Modal */}
+      <Modal visible={forgotVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalTitle}>Reset Password</Text>
+
+              {resetStep === 'email' ? (
+                <>
+                  <Text style={styles.modalSubtitle}>
+                    Enter your email address and we'll send you a reset code.
+                  </Text>
+                  <Text style={styles.label}>Email Address</Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter your email"
+                      placeholderTextColor="#94a3b8"
+                      value={resetEmail}
+                      onChangeText={setResetEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+
+                  <TouchableOpacity onPress={sendResetCode} disabled={resetLoading}>
+                    <LinearGradient
+                      colors={['#0284c7', '#0ea5e9']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.button}
+                    >
+                      {resetLoading ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.buttonText}>Send Reset Code</Text>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.modalSubtitle}>
+                    Enter the code we sent to {resetEmail}, plus your new password.
+                  </Text>
+
+                  <Text style={styles.label}>Reset Code</Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter code from email"
+                      placeholderTextColor="#94a3b8"
+                      value={resetCode}
+                      onChangeText={setResetCode}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+
+                  <Text style={styles.label}>New Password</Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter new password"
+                      placeholderTextColor="#94a3b8"
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry
+                    />
+                  </View>
+
+                  <Text style={styles.label}>Confirm New Password</Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Re-enter new password"
+                      placeholderTextColor="#94a3b8"
+                      value={confirmNewPassword}
+                      onChangeText={setConfirmNewPassword}
+                      secureTextEntry
+                    />
+                  </View>
+
+                  <TouchableOpacity onPress={confirmPasswordReset} disabled={resetLoading}>
+                    <LinearGradient
+                      colors={['#0284c7', '#0ea5e9']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.button}
+                    >
+                      {resetLoading ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.buttonText}>Reset Password</Text>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleResendCode}
+                    disabled={resetLoading || resendCooldown > 0}
+                    style={styles.forgotLink}
+                  >
+                    <Text
+                      style={[
+                        styles.forgotLinkText,
+                        resendCooldown > 0 && { color: '#94a3b8' },
+                      ]}
+                    >
+                      {resendCooldown > 0
+                        ? `Resend code (${resendCooldown}s)`
+                        : 'Resend code'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setForgotVisible(false)}
+              >
+                <Text style={styles.modalCloseText}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -469,7 +715,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
     borderRadius: 14,
-    marginBottom: 18,
+    marginBottom: 8,
     paddingHorizontal: 14,
   },
   passwordInput: {
@@ -488,6 +734,16 @@ const styles = StyleSheet.create({
     color: '#0369a1',
     fontSize: 12,
     fontWeight: '700',
+  },
+
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginBottom: 18,
+  },
+  forgotLinkText: {
+    color: '#0369a1',
+    fontSize: 13,
+    fontWeight: '600',
   },
 
   button: {
@@ -517,4 +773,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-}); 
+
+  // Forgot password modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalBox: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '85%' },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0369a1', marginBottom: 8 },
+  modalSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 18, lineHeight: 18 },
+  modalCloseBtn: { marginTop: 16, alignItems: 'center', padding: 12 },
+  modalCloseText: { color: '#dc2626', fontWeight: '600', fontSize: 14 },
+});

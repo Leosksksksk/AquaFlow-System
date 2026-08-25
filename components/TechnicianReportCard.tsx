@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 interface Report {
   id: string;
@@ -13,23 +14,32 @@ interface Report {
 
 interface Props {
   report: Report;
-  onUpdateStatus?: (id: string, status: string) => void; // 👈 Made optional with '?'
   onUpdated?: () => void;
 }
 
-export default function TechnicianReportCard({ report, onUpdateStatus, onUpdated }: Props) {
-  const handleStatusChange = (status: string) => {
-    if (onUpdateStatus) {
-      onUpdateStatus(report.id, status);
+export default function TechnicianReportCard({ report, onUpdated }: Props) {
+  const [saving, setSaving] = useState(false);
+
+  const handleStatusChange = async (status: string) => {
+    setSaving(true);
+    const { error } = await supabase
+      .from('fault_reports')
+      .update({
+        status,
+        resolved_at: status === 'Resolved' ? new Date().toISOString() : null,
+      })
+      .eq('id', report.id);
+    setSaving(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
     }
-    if (onUpdated) {
-      onUpdated();
-    }
+    if (onUpdated) onUpdated();
   };
 
   return (
     <View style={styles.card}>
-      {/* Display attached photo if available */}
       {report.photo_url ? (
         <Image
           source={{ uri: report.photo_url }}
@@ -46,6 +56,21 @@ export default function TechnicianReportCard({ report, onUpdateStatus, onUpdated
           </View>
         </View>
 
+        {report.status === 'In Progress' && (
+          <View style={[styles.progressBanner, { backgroundColor: '#dbeafe' }]}>
+            <Text style={[styles.progressBannerText, { color: '#1d4ed8' }]}>
+              🔧 You marked this as In Progress
+            </Text>
+          </View>
+        )}
+        {report.status === 'Resolved' && (
+          <View style={[styles.progressBanner, { backgroundColor: '#dcfce7' }]}>
+            <Text style={[styles.progressBannerText, { color: '#166534' }]}>
+              ✅ You marked this as Resolved
+            </Text>
+          </View>
+        )}
+
         <Text style={styles.description}>{report.description}</Text>
         <Text style={styles.meta}>📍 {report.location}</Text>
         <Text style={styles.meta}>Reported by {report.reporter_name}</Text>
@@ -54,6 +79,7 @@ export default function TechnicianReportCard({ report, onUpdateStatus, onUpdated
           <TouchableOpacity
             style={[styles.btn, styles.progressBtn]}
             onPress={() => handleStatusChange('In Progress')}
+            disabled={saving}
           >
             <Text style={styles.btnText}>Mark In Progress</Text>
           </TouchableOpacity>
@@ -61,6 +87,7 @@ export default function TechnicianReportCard({ report, onUpdateStatus, onUpdated
           <TouchableOpacity
             style={[styles.btn, styles.resolveBtn]}
             onPress={() => handleStatusChange('Resolved')}
+            disabled={saving}
           >
             <Text style={styles.btnText}>Mark Resolved</Text>
           </TouchableOpacity>
@@ -110,6 +137,15 @@ const styles = StyleSheet.create({
     color: '#0369a1',
     fontWeight: '700',
     fontSize: 12,
+  },
+  progressBanner: {
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  progressBannerText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   description: {
     fontSize: 14,

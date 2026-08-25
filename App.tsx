@@ -10,11 +10,13 @@ import { supabase } from './lib/supabase';
 export default function App() {
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [authenticatedRole, setAuthenticatedRole] = useState<UserRole | null>(null);
+  const [loggedInName, setLoggedInName] = useState<string>('');
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setAuthenticatedRole(null);
     setSelectedRole(null);
+    setLoggedInName('');
   };
 
   // Render Dashboard after successful authentication
@@ -27,7 +29,7 @@ export default function App() {
   }
 
   if (authenticatedRole === 'Technician') {
-    return <TechnicianScreen onBack={handleLogout} />;
+    return <TechnicianScreen onBack={handleLogout} techName={loggedInName} />;
   }
 
   // Render Login/Signup Screen if a role card was clicked
@@ -36,7 +38,10 @@ export default function App() {
       <AuthScreen
         initialRole={selectedRole}
         onBack={() => setSelectedRole(null)}
-        onLoginSuccess={(role) => setAuthenticatedRole(role)}
+        onLoginSuccess={(role, fullName) => {
+          setLoggedInName(fullName);
+          setAuthenticatedRole(role);
+        }}
       />
     );
   }

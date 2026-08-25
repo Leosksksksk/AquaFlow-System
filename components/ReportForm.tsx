@@ -14,6 +14,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 
+type Orientation = 'portrait' | 'landscape';
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -26,7 +28,19 @@ export default function ReportForm({ visible, onClose, onSaved }: Props) {
   const [location, setLocation] = useState('');
   const [reporterName, setReporterName] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [orientation, setOrientation] = useState<Orientation>('portrait');
   const [loading, setLoading] = useState(false);
+
+  // Reads width/height from whatever the picker gave us so the preview
+  // starts on the correct orientation; the user can still override it below.
+  const applyPickerResult = (result: ImagePicker.ImagePickerResult) => {
+    if (result.canceled || !result.assets || result.assets.length === 0) return;
+    const asset = result.assets[0];
+    setImageUri(asset.uri);
+    if (asset.width && asset.height) {
+      setOrientation(asset.width >= asset.height ? 'landscape' : 'portrait');
+    }
+  };
 
   // 1. Function to open device camera
   const handleTakePhoto = async () => {
@@ -46,9 +60,33 @@ export default function ReportForm({ visible, onClose, onSaved }: Props) {
       quality: 0.7,
     });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      setImageUri(result.assets[0].uri);
+    applyPickerResult(result);
+  };
+
+  // 1b. Function to pick a photo from the device's album/gallery
+  const handleChooseFromAlbum = async () => {
+    // Request permission to access the photo library
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permissionResult.granted) {
+      Alert.alert('Permission Denied', 'Photo library access is required to attach a photo.');
+      return;
     }
+
+    // Launch the album/gallery picker
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
+    });
+
+    applyPickerResult(result);
+  };
+
+  const removePhoto = () => {
+    setImageUri(null);
+    setOrientation('portrait');
   };
 
   // 2. Submit report logic
@@ -99,6 +137,7 @@ export default function ReportForm({ visible, onClose, onSaved }: Props) {
           location,
           reporter_name: reporterName,
           photo_url: photoUrl,
+          photo_orientation: imageUri ? orientation : null,
           status: 'Pending',
         },
       ]);
@@ -111,6 +150,7 @@ export default function ReportForm({ visible, onClose, onSaved }: Props) {
       setLocation('');
       setReporterName('');
       setImageUri(null);
+      setOrientation('portrait');
       onSaved();
       onClose();
     } catch (error: any) {
@@ -167,24 +207,61 @@ export default function ReportForm({ visible, onClose, onSaved }: Props) {
 
             <Text style={styles.label}>Photo</Text>
 
-            {/* Render Preview if photo is captured, else render Attach Photo button */}
+            {/* Render Preview if photo is captured, else render the two attach buttons */}
             {imageUri ? (
               <View style={styles.previewContainer}>
-                <Image source={{ uri: imageUri }} style={styles.previewImage} />
-                <TouchableOpacity
-                  style={styles.retakeBtn}
-                  onPress={handleTakePhoto}
+                <View
+                  style={[
+                    styles.previewFrame,
+                    orientation === 'portrait' ? styles.previewFramePortrait : styles.previewFrameLandscape,
+                  ]}
                 >
-                  <Text style={styles.retakeBtnText}>📷 Retake Photo</Text>
-                </TouchableOpacity>
+                  <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="cover" />
+                  <TouchableOpacity style={styles.removeBtn} onPress={removePhoto}>
+                    <Text style={styles.removeBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.orientationRow}>
+                  <Text style={styles.orientationLabel}>Orientation</Text>
+                  <View style={styles.segmented}>
+                    <TouchableOpacity
+                      style={[styles.segBtn, orientation === 'portrait' && styles.segBtnActive]}
+                      onPress={() => setOrientation('portrait')}
+                    >
+                      <Text style={[styles.segBtnText, orientation === 'portrait' && styles.segBtnTextActive]}>
+                        Portrait
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.segBtn, orientation === 'landscape' && styles.segBtnActive]}
+                      onPress={() => setOrientation('landscape')}
+                    >
+                      <Text style={[styles.segBtnText, orientation === 'landscape' && styles.segBtnTextActive]}>
+                        Landscape
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.retakeRow}>
+                  <TouchableOpacity style={styles.retakeBtn} onPress={handleTakePhoto}>
+                    <Text style={styles.retakeBtnText}>📷 Retake Photo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.retakeBtn} onPress={handleChooseFromAlbum}>
+                    <Text style={styles.retakeBtnText}>🖼️ Choose Different</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.photoBtn}
-                onPress={handleTakePhoto}
-              >
-                <Text style={styles.photoBtnText}>📷 Attach Photo (Take Picture)</Text>
-              </TouchableOpacity>
+              <View style={styles.photoActionsRow}>
+                <TouchableOpacity style={styles.photoBtn} onPress={handleTakePhoto}>
+                  <Text style={styles.photoBtnText}>📷 Take Picture</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.photoBtn} onPress={handleChooseFromAlbum}>
+                  <Text style={styles.photoBtnText}>🖼️ Choose from Album</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             <View style={styles.actionRow}>
@@ -255,27 +332,105 @@ const styles = StyleSheet.create({
     height: 90,
     textAlignVertical: 'top',
   },
+
+  photoActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 24,
+  },
   photoBtn: {
+    flex: 1,
     backgroundColor: '#e0f2fe',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginBottom: 24,
   },
   photoBtnText: {
     color: '#0369a1',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
+
   previewContainer: {
     alignItems: 'center',
     marginBottom: 24,
   },
+  previewFrame: {
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#0f172a',
+    marginBottom: 10,
+  },
+  previewFramePortrait: {
+    width: 200,
+    aspectRatio: 3 / 4,
+    alignSelf: 'center',
+  },
+  previewFrameLandscape: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+  },
   previewImage: {
     width: '100%',
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 8,
+    height: '100%',
+  },
+  removeBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    lineHeight: 13,
+  },
+
+  orientationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 12,
+  },
+  orientationLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 9,
+    padding: 3,
+    gap: 2,
+  },
+  segBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+  },
+  segBtnActive: {
+    backgroundColor: '#ffffff',
+  },
+  segBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  segBtnTextActive: {
+    color: '#0369a1',
+  },
+
+  retakeRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
   retakeBtn: {
     paddingVertical: 6,
@@ -286,6 +441,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 13,
   },
+
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

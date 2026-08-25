@@ -42,6 +42,20 @@ export default function ResidentScreen({ onBack }: Props) {
 
   useEffect(() => {
     fetchReports();
+
+    // Live updates: refresh automatically when any report changes
+    const channel = supabase
+      .channel('resident_fault_reports')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fault_reports' },
+        () => fetchReports()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchReports]);
 
   const onRefresh = () => {
@@ -81,6 +95,22 @@ export default function ResidentScreen({ onBack }: Props) {
                   <Text style={styles.badgeText}>{item.status}</Text>
                 </View>
               </View>
+
+              {item.status === 'In Progress' && (
+                <View style={styles.progressBanner}>
+                  <Text style={styles.progressBannerText}>
+                    🔧 Technician is currently working on this repair
+                  </Text>
+                </View>
+              )}
+              {item.status === 'Resolved' && (
+                <View style={[styles.progressBanner, styles.resolvedBanner]}>
+                  <Text style={[styles.progressBannerText, styles.resolvedBannerText]}>
+                    ✅ This issue has been resolved
+                  </Text>
+                </View>
+              )}
+
               <Text style={styles.desc}>{item.description}</Text>
               {item.location ? <Text style={styles.meta}>📍 {item.location}</Text> : null}
               <Text style={styles.meta}>Reported by {item.reporter_name}</Text>
@@ -124,6 +154,10 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '700', color: '#111', flex: 1, marginRight: 8 },
   badge: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12 },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  progressBanner: { backgroundColor: '#dbeafe', borderRadius: 8, padding: 10, marginTop: 10 },
+  progressBannerText: { fontSize: 12, fontWeight: '700', color: '#1d4ed8' },
+  resolvedBanner: { backgroundColor: '#dcfce7' },
+  resolvedBannerText: { color: '#166534' },
   desc: { color: '#444', marginTop: 6, fontSize: 14 },
   meta: { color: '#777', fontSize: 12, marginTop: 4 },
   broadcastBox: { backgroundColor: '#fef9c3', borderRadius: 8, padding: 10, marginTop: 10 },
